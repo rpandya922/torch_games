@@ -52,7 +52,10 @@ def eval_model(model, env, n_eval=50):
 
 
 if __name__ == "__main__":
-    env = RepeatedBoSEnv(bach_partner, 100)
+    th.manual_seed(0)
+    np.random.seed(0)
+
+    env = RepeatedBoSEnv(helpful_partner, 20)
     model = LTA_PPO(
         policy=ActorCriticPolicy, 
         env=env,
@@ -70,7 +73,7 @@ if __name__ == "__main__":
     print("----------------------------------------------------------")
     print()
 
-    model.learn(total_timesteps=10000)
+    model.learn(total_timesteps=15000)
 
     # measure accuracy of human prediction model
     acc, avg_rew = eval_model(model, env, n_eval=n_eval)

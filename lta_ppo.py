@@ -308,23 +308,21 @@ class LTA_PPO(OnPolicyAlgorithm):
         for epoch in range(self.n_epochs):
             approx_kl_divs = []
             # Do a complete pass on the rollout buffer
-            for rollout_data in self.rollout_buffer.get(self.batch_size):
-                observations = rollout_data.observations
+            # TODO: account for batch size?
+            observations = th.tensor(self.rollout_buffer.observations.squeeze())
 
-                # TODO: figure out if order of observations is shuffled anywhere (if it is, this loss
-                # is meaningless)
-                pred_actions = self.policy.features_extractor.human(preprocess_obs(observations[:-1,:], self.observation_space))
-                next_actions = F.one_hot(observations[:,1][1:].long(), num_classes=2).float()
-                
-                # compute cross entropy loss
-                loss = ce_loss(pred_actions, next_actions)
+            pred_actions = self.policy.features_extractor.human(preprocess_obs(observations[:-1,:], self.observation_space))
+            next_actions = F.one_hot(observations[:,1][1:].long(), num_classes=2).float()
 
-                # Optimization step
-                self.policy.optimizer.zero_grad()
-                loss.backward()
-                # Clip grad norm
-                th.nn.utils.clip_grad_norm_(self.policy.parameters(), self.max_grad_norm)
-                self.policy.optimizer.step()
+            # compute cross entropy loss
+            loss = ce_loss(pred_actions, next_actions)
+
+            # Optimization step
+            self.policy.optimizer.zero_grad()
+            loss.backward()
+            # Clip grad norm
+            th.nn.utils.clip_grad_norm_(self.policy.parameters(), self.max_grad_norm)
+            self.policy.optimizer.step()
 
         # unfreeze full network
         for param in self.policy.parameters():

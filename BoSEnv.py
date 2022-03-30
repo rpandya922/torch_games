@@ -13,7 +13,7 @@ class RepeatedBoSEnv(gym.Env):
         self.horizon = horizon
         self.action_space = spaces.Discrete(2)
         # observation is the actions of both agents in the previous game
-        self.observation_space = spaces.MultiDiscrete([2, 2])
+        self.observation_space = spaces.MultiDiscrete([2, 2]) # includes state and action
         # state is the actions of both agents in the previous game
         # initialize state randomly since there was no previous game
         self.state = self.observation_space.sample()
@@ -37,15 +37,16 @@ class RepeatedBoSEnv(gym.Env):
             # both agents decide on Stravinsky
             reward = 2
 
-        observation = (action, partner_action)
+        joint_action = (action, partner_action)
+        self.state = joint_action
 
-        return observation, reward, (self.game_num >= self.horizon), {}
+        return joint_action, reward, (self.game_num >= self.horizon), {}
 
     def reset(self):
         self.game_num = 0
-        state = self.observation_space.sample()
-        self.state = state
+        observation = self.observation_space.sample()
+        self.state = observation
 
-        return state
+        return observation
 
 

@@ -13,6 +13,17 @@ from BoSEnv import RepeatedBoSEnv
 def bach_partner(obs):
     return 0
 
+def stravinsky_partner(obs):
+    return 1
+
+def helpful_partner(obs):
+    # always picks what the robot picked last time
+    return obs[0]
+
+def adversarial_partner(obs):
+    # always picks the opposite of what the robot picked last time
+    return not obs[0]
+
 def eval_model(model, env, n_eval=50):
     obs = env.reset()
     n_correct = 0
@@ -41,15 +52,18 @@ def eval_model(model, env, n_eval=50):
 
 
 if __name__ == "__main__":
-    env = RepeatedBoSEnv(bach_partner, 10)
+    env = RepeatedBoSEnv(bach_partner, 100)
     model = LTA_PPO(
         policy=ActorCriticPolicy, 
         env=env,
         policy_kwargs={"features_extractor_class": LTAExtractor,
-                       "features_extractor_kwargs": {"features_dim": 16, "n_actions": 2}}
+                       "features_extractor_kwargs": {"features_dim": 16, 
+                                                     "n_actions": 2,
+                                                     "human_pred": True}}
     )
+    n_eval = 100
 
-    acc, avg_rew = eval_model(model, env)
+    acc, avg_rew = eval_model(model, env, n_eval=n_eval)
     print("----------------------------------------------------------")
     print("Before training")
     print(f"Average Reward: {avg_rew}  Human Model Accuracy: {acc*100}%")
@@ -59,7 +73,7 @@ if __name__ == "__main__":
     model.learn(total_timesteps=10000)
 
     # measure accuracy of human prediction model
-    acc, avg_rew = eval_model(model, env)
+    acc, avg_rew = eval_model(model, env, n_eval=n_eval)
     print("----------------------------------------------------------")
     print("After training")
     print(f"Average Reward: {avg_rew}  Human Model Accuracy: {acc*100}%")

@@ -1,5 +1,6 @@
 import gym
 import torch as th
+from torch.nn import functional as F
 import numpy as np
 
 from stable_baselines3.common.policies import ActorCriticPolicy
@@ -24,10 +25,23 @@ def adversarial_partner(obs):
     # always picks the opposite of what the robot picked last time
     return not obs[0]
 
-def eval_model(model, env, n_eval=50):
+def eval_model(model, env, n_eval=50, adapt=False):
     obs = env.reset()
     n_correct = 0
     rewards = []
+
+    # keep track of observations and human actions during evaluation
+    observations = []
+    human_actions = []
+    ce_loss = th.nn.CrossEntropyLoss()
+    if adapt:
+        # unfreeze human prediction model, freeze everything else
+        for param in model.policy.parameters():
+            param.requires_grad = False
+        for (name, param) in model.policy.features_extractor.named_parameters():
+            if name[:5] == "human":
+                param.requires_grad = True
+
     for i in range(n_eval):
         obs_tensor = obs_as_tensor(np.array([obs]), model.device)
         actions, values, log_probs = model.policy(obs_tensor)
@@ -40,6 +54,10 @@ def eval_model(model, env, n_eval=50):
         next_h_action = next_obs[1]
         pred_action = th.argmax(human_pred)
 
+        # store data for adaptation
+        observations.append(preprocessed_obs)
+        human_actions.append(next_h_action)
+
         if next_h_action == pred_action:
             n_correct += 1
 
@@ -47,6 +65,22 @@ def eval_model(model, env, n_eval=50):
         obs = next_obs
         if done:
             obs = env.reset()
+
+        # run adaptation
+        if adapt and i >= 1:
+            obs_tensor = th.concat(observations, 0)
+            pred_actions = model.policy.features_extractor.human(obs_tensor[:-1,:])
+            next_actions = F.one_hot(obs_tensor[:,1][1:].long(), num_classes=2).float()
+
+            # compute cross entropy loss
+            loss = ce_loss(pred_actions, next_actions)
+
+            # Optimization step
+            model.policy.optimizer.zero_grad()
+            loss.backward()
+            # Clip grad norm
+            th.nn.utils.clip_grad_norm_(model.policy.parameters(), model.max_grad_norm)
+            model.policy.optimizer.step()
 
     return n_correct / n_eval, np.mean(rewards)
 
@@ -81,5 +115,16 @@ if __name__ == "__main__":
     print("After training")
     print(f"Average Reward: {avg_rew}  Human Model Accuracy: {acc*100}%")
     print("----------------------------------------------------------")
+    print()
 
+    # test on different human partner policy than training
+    env2 = RepeatedBoSEnv(stravinsky_partner, 20)
+    # measure accuracy of human prediction model
+    acc, avg_rew = eval_model(model, env2, n_eval=1000, adapt=False)
+    print("----------------------------------------------------------")
+    print("After training (different human partner)")
+    print(f"Average Reward: {avg_rew}  Human Model Accuracy: {acc*100}%")
+    print("----------------------------------------------------------")
+    # TODO: figure out why adaptation doesn't increase prediction accuracy even
+    # over a long horizon
 

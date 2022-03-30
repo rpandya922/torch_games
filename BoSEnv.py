@@ -9,6 +9,7 @@ class RepeatedBoSEnv(gym.Env):
         partner_policy: function that determines the policy of the partner agent
         horizon: number of games to play
         """
+        # TODO: take in list of partner policies
         self.partner_policy = partner_policy
         self.horizon = horizon
         self.action_space = spaces.Discrete(2)
@@ -43,6 +44,7 @@ class RepeatedBoSEnv(gym.Env):
         return joint_action, reward, (self.game_num >= self.horizon), {}
 
     def reset(self):
+        # TODO: choose one partner policy to use for this rollout
         self.game_num = 0
         observation = self.observation_space.sample()
         self.state = observation

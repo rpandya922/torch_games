@@ -302,17 +302,23 @@ class LTA_PPO(OnPolicyAlgorithm):
             if name[:5] == "human":
                 param.requires_grad = True
 
-        # TODO: add logging
+        h_pred_entropy_losses = []
+        h_pred_acc = []
         ce_loss = th.nn.CrossEntropyLoss()
         # train human prediction model for n_epochs epochs
         for epoch in range(self.n_epochs):
             approx_kl_divs = []
             # Do a complete pass on the rollout buffer
+
             # TODO: account for batch size?
             observations = th.tensor(self.rollout_buffer.observations.squeeze())
 
             pred_actions = self.policy.features_extractor.human(preprocess_obs(observations[:-1,:], self.observation_space))
             next_actions = F.one_hot(observations[:,1][1:].long(), num_classes=2).float()
+
+            pred_action_labels = th.argmax(pred_actions, dim=1)
+            next_action_labels = th.argmax(next_actions, dim=1)
+            n_correct = th.sum(pred_action_labels == next_action_labels).item()
 
             # compute cross entropy loss
             loss = ce_loss(pred_actions, next_actions)
@@ -323,6 +329,12 @@ class LTA_PPO(OnPolicyAlgorithm):
             # Clip grad norm
             th.nn.utils.clip_grad_norm_(self.policy.parameters(), self.max_grad_norm)
             self.policy.optimizer.step()
+
+            h_pred_entropy_losses.append(loss.item())
+            h_pred_acc.append(n_correct / pred_actions.shape[0])
+
+        self.logger.record("train/h_pred_loss", np.mean(h_pred_entropy_losses))
+        self.logger.record("train/h_pred_acc", np.mean(h_pred_acc))
 
         # unfreeze full network
         for param in self.policy.parameters():

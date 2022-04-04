@@ -27,7 +27,15 @@ def adversarial_partner(obs):
         return 0
     return 1
 
-def eval_model(model, env, n_eval=50, adapt=False):
+def eval_model(model, env, n_eval=50, adapt=False, trained_steps=0):
+    """
+    Evaluates a pretrained policy 
+
+    adapt: whether to adapt the model online during evaluation
+    trained_steps: number of steps the model was trained for previously
+        used for logging, only applicable if adapt=True
+    """
+
     obs = env.reset()
     n_correct = 0
     corrects = np.zeros(n_eval)
@@ -99,7 +107,7 @@ def eval_model(model, env, n_eval=50, adapt=False):
             model.logger.record("adapt/reward", rew)
             model.logger.record("adapt/h_pred_loss", loss.item())
             model.logger.record("adapt/h_pred_acc", (n_correct_pred / pred_actions.shape[0]))
-            model.logger.dump(step=i)
+            model.logger.dump(step=trained_steps+i)
 
     rolling_avg = np.convolve(corrects, np.ones(20)/20, mode='valid')
 
@@ -110,7 +118,10 @@ if __name__ == "__main__":
     th.manual_seed(0)
     np.random.seed(0)
 
-    env = RepeatedBoSEnv(helpful_partner, 20)
+    horizon = 20
+    train_timesteps = 60_000
+
+    env = RepeatedBoSEnv(partner_policies=[helpful_partner, adversarial_partner], horizon=horizon)
     model = LTA_PPO(
         policy=ActorCriticPolicy, 
         env=env,
@@ -129,7 +140,7 @@ if __name__ == "__main__":
     print("----------------------------------------------------------")
     print()
 
-    model.learn(total_timesteps=60_000)
+    model.learn(total_timesteps=train_timesteps)
 
     # measure accuracy of human prediction model
     acc, avg_rew = eval_model(model, env, n_eval=n_eval)
@@ -140,7 +151,7 @@ if __name__ == "__main__":
     print()
 
     # test on different human partner policy than training
-    env2 = RepeatedBoSEnv(stravinsky_partner, 20)
+    env2 = RepeatedBoSEnv(partner_policies=[adversarial_partner], horizon=horizon)
     # measure accuracy of human prediction model
     acc, avg_rew = eval_model(model, env2, n_eval=n_eval, adapt=False)
     print("----------------------------------------------------------")
@@ -150,9 +161,10 @@ if __name__ == "__main__":
     print()
 
     # test on different human partner policy than training
-    env2 = RepeatedBoSEnv(stravinsky_partner, 20)
+    env2 = RepeatedBoSEnv(partner_policies=[adversarial_partner], horizon=horizon)
     # measure accuracy of human prediction model
-    acc, avg_rew = eval_model(model, env2, n_eval=n_eval, adapt=True)
+    acc, avg_rew = eval_model(model, env2, n_eval=n_eval, adapt=True, 
+        trained_steps=train_timesteps)
     print("----------------------------------------------------------")
     print("[with adaptation] After training (different human partner)")
     print(f"Average Reward: {avg_rew}  Human Model Accuracy: {acc*100}%")

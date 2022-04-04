@@ -1,16 +1,16 @@
+import numpy as np
 import gym
 from gym import spaces
 
 class RepeatedBoSEnv(gym.Env):
-    def __init__(self, partner_policy, horizon):
+    def __init__(self, partner_policies, horizon):
         super(RepeatedBoSEnv, self).__init__()
         """Implementation of a repeated simultaneous game (Bach or Stravinsky)
         
         partner_policy: function that determines the policy of the partner agent
         horizon: number of games to play
         """
-        # TODO: take in list of partner policies
-        self.partner_policy = partner_policy
+        self.partner_policies = partner_policies
         self.horizon = horizon
         self.action_space = spaces.Discrete(2)
         # observation is the actions of both agents in the previous game
@@ -44,7 +44,8 @@ class RepeatedBoSEnv(gym.Env):
         return joint_action, reward, (self.game_num >= self.horizon), {}
 
     def reset(self):
-        # TODO: choose one partner policy to use for this rollout
+        # choose one partner policy to use for this rollout
+        self.partner_policy = self.partner_policies[np.random.randint(len(self.partner_policies))]
         self.game_num = 0
         observation = self.observation_space.sample()
         self.state = observation

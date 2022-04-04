@@ -25,7 +25,7 @@ class LTAExtractor(BaseFeaturesExtractor):
             ("human_linear0", nn.Linear(input_shape, 32)),
             ("human_relu0", nn.ReLU()),
             ("human_linear1", nn.Linear(32, human_out)),
-            ("human_softmax1", nn.Softmax(dim=1)) # softmax for action probabilities
+            # ("human_softmax1", nn.Softmax(dim=1)) # softmax for action probabilities
         ]))
  
         self.robot = nn.Sequential(OrderedDict([

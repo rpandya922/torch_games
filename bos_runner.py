@@ -82,23 +82,25 @@ def eval_model(model, env, n_eval=50, adapt=False, trained_steps=0):
 
         # run adaptation
         if adapt and i >= 1:
-            obs_tensor = th.concat(observations, 0)
-            pred_actions = model.policy.features_extractor.human(obs_tensor)
-            next_actions = F.one_hot(th.tensor(human_actions), num_classes=2).float()
+            n_grad_steps = 3
+            for j in range(n_grad_steps):
+                obs_tensor = th.concat(observations, 0)
+                pred_actions = model.policy.features_extractor.human(obs_tensor)
+                next_actions = F.one_hot(th.tensor(human_actions), num_classes=2).float()
 
-            pred_action_labels = th.argmax(pred_actions, dim=1)
-            next_action_labels = th.argmax(next_actions, dim=1)
-            n_correct_pred = th.sum(pred_action_labels == next_action_labels).item()
+                pred_action_labels = th.argmax(pred_actions, dim=1)
+                next_action_labels = th.argmax(next_actions, dim=1)
+                n_correct_pred = th.sum(pred_action_labels == next_action_labels).item()
 
-            # compute cross entropy loss
-            loss = ce_loss(pred_actions, next_actions)
+                # compute cross entropy loss
+                loss = ce_loss(pred_actions, next_actions)
 
-            # Optimization step
-            model.policy.optimizer.zero_grad()
-            loss.backward()
-            # Clip grad norm
-            th.nn.utils.clip_grad_norm_(model.policy.parameters(), model.max_grad_norm)
-            model.policy.optimizer.step()
+                # Optimization step
+                model.policy.optimizer.zero_grad()
+                loss.backward()
+                # Clip grad norm
+                th.nn.utils.clip_grad_norm_(model.policy.parameters(), model.max_grad_norm)
+                model.policy.optimizer.step()
 
             # saving data for logging
             h_pred_entropy_losses.append(loss.item())
@@ -120,6 +122,7 @@ if __name__ == "__main__":
 
     horizon = 20
     train_timesteps = 60_000
+    n_eval = 100
 
     env = RepeatedBoSEnv(partner_policies=[helpful_partner, adversarial_partner], horizon=horizon)
     model = LTA_PPO(
@@ -131,7 +134,6 @@ if __name__ == "__main__":
                                                      "human_pred": True}},
         tensorboard_log="./lta_ppo_bos_tensorboard/"
     )
-    n_eval = 100
 
     acc, avg_rew = eval_model(model, env, n_eval=n_eval)
     print("----------------------------------------------------------")
@@ -151,7 +153,7 @@ if __name__ == "__main__":
     print()
 
     # test on different human partner policy than training
-    env2 = RepeatedBoSEnv(partner_policies=[adversarial_partner], horizon=horizon)
+    env2 = RepeatedBoSEnv(partner_policies=[helpful_partner], horizon=horizon)
     # measure accuracy of human prediction model
     acc, avg_rew = eval_model(model, env2, n_eval=n_eval, adapt=False)
     print("----------------------------------------------------------")
@@ -161,7 +163,7 @@ if __name__ == "__main__":
     print()
 
     # test on different human partner policy than training
-    env2 = RepeatedBoSEnv(partner_policies=[adversarial_partner], horizon=horizon)
+    env2 = RepeatedBoSEnv(partner_policies=[helpful_partner], horizon=horizon)
     # measure accuracy of human prediction model
     acc, avg_rew = eval_model(model, env2, n_eval=n_eval, adapt=True, 
         trained_steps=train_timesteps)

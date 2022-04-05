@@ -6,6 +6,7 @@ import numpy as np
 from stable_baselines3.common.policies import ActorCriticPolicy
 from stable_baselines3.common.utils import obs_as_tensor
 from stable_baselines3.common.preprocessing import preprocess_obs
+from stable_baselines3.common.logger import configure
 
 from lta_ppo import LTA_PPO
 from lta_features import LTAExtractor
@@ -27,7 +28,7 @@ def adversarial_partner(obs):
         return 0
     return 1
 
-def eval_model(model, env, n_eval=50, adapt=False, trained_steps=0):
+def eval_model(model, env, n_eval=50, adapt=False, trained_steps=0, log=False):
     """
     Evaluates a pretrained policy 
 
@@ -106,10 +107,15 @@ def eval_model(model, env, n_eval=50, adapt=False, trained_steps=0):
             h_pred_entropy_losses.append(loss.item())
             h_pred_acc.append(n_correct_pred / pred_actions.shape[0])
 
-            model.logger.record("adapt/reward", rew)
-            model.logger.record("adapt/h_pred_loss", loss.item())
-            model.logger.record("adapt/h_pred_acc", (n_correct_pred / pred_actions.shape[0]))
-            model.logger.dump(step=trained_steps+i)
+            if log:
+                model.logger.record("adapt/reward", rew)
+                model.logger.record("adapt/h_pred_loss", loss.item())
+                model.logger.record("adapt/h_pred_acc", (n_correct_pred / pred_actions.shape[0]))
+                model.logger.dump(step=trained_steps+i)
+        elif not adapt:
+            if log:
+                model.logger.record("adapt/reward_no_adapt", rew)
+                model.logger.dump(step=trained_steps+i)
 
     rolling_avg = np.convolve(corrects, np.ones(20)/20, mode='valid')
 
@@ -123,8 +129,10 @@ if __name__ == "__main__":
     horizon = 20
     train_timesteps = 60_000
     n_eval = 100
+    training_partners = [helpful_partner, adversarial_partner]
+    testing_partner = [adversarial_partner]
 
-    env = RepeatedBoSEnv(partner_policies=[helpful_partner, adversarial_partner], horizon=horizon)
+    env = RepeatedBoSEnv(partner_policies=training_partners, horizon=horizon)
     model = LTA_PPO(
         policy=ActorCriticPolicy, 
         env=env,
@@ -135,7 +143,7 @@ if __name__ == "__main__":
         tensorboard_log="./lta_ppo_bos_tensorboard/"
     )
 
-    acc, avg_rew = eval_model(model, env, n_eval=n_eval)
+    acc, avg_rew = eval_model(model, env, n_eval=n_eval, log=False)
     print("----------------------------------------------------------")
     print("Before training")
     print(f"Average Reward: {avg_rew}  Human Model Accuracy: {acc*100}%")
@@ -144,8 +152,12 @@ if __name__ == "__main__":
 
     model.learn(total_timesteps=train_timesteps)
 
+    # testing effect of human pred network on joint reasoning output 
+    # joint_in = th.zeros(34).float()
+    # print(th.autograd.functional.jacobian(model.policy.features_extractor.joint, joint_in)[:,:2])
+
     # measure accuracy of human prediction model
-    acc, avg_rew = eval_model(model, env, n_eval=n_eval)
+    acc, avg_rew = eval_model(model, env, n_eval=n_eval, log=False)
     print("----------------------------------------------------------")
     print("After training")
     print(f"Average Reward: {avg_rew}  Human Model Accuracy: {acc*100}%")
@@ -153,9 +165,10 @@ if __name__ == "__main__":
     print()
 
     # test on different human partner policy than training
-    env2 = RepeatedBoSEnv(partner_policies=[helpful_partner], horizon=horizon)
+    env2 = RepeatedBoSEnv(partner_policies=testing_partner, horizon=horizon)
     # measure accuracy of human prediction model
-    acc, avg_rew = eval_model(model, env2, n_eval=n_eval, adapt=False)
+    acc, avg_rew = eval_model(model, env2, n_eval=n_eval, adapt=False, 
+        trained_steps=train_timesteps, log=True)
     print("----------------------------------------------------------")
     print("After training (different human partner)")
     print(f"Average Reward: {avg_rew}  Human Model Accuracy: {acc*100}%")
@@ -163,12 +176,21 @@ if __name__ == "__main__":
     print()
 
     # test on different human partner policy than training
-    env2 = RepeatedBoSEnv(partner_policies=[helpful_partner], horizon=horizon)
+    env2 = RepeatedBoSEnv(partner_policies=testing_partner, horizon=horizon)
     # measure accuracy of human prediction model
-    acc, avg_rew = eval_model(model, env2, n_eval=n_eval, adapt=True, 
-        trained_steps=train_timesteps)
+    acc, adapt_avg_rew = eval_model(model, env2, n_eval=n_eval, adapt=True, 
+        trained_steps=train_timesteps, log=True)
     print("----------------------------------------------------------")
     print("[with adaptation] After training (different human partner)")
-    print(f"Average Reward: {avg_rew}  Human Model Accuracy: {acc*100}%")
+    print(f"Average Reward: {adapt_avg_rew}  Human Model Accuracy: {acc*100}%")
     print("----------------------------------------------------------")
+
+    # log hyperparamaters for this run
+    model.logger.output_formats[0].writer.add_hparams({"training_partners": str([f.__name__ for f in training_partners]),
+                                                       "testing_partner": testing_partner[0].__name__,
+                                                       "horizon": horizon,
+                                                       "n_eval": n_eval,
+                                                       "train_timesteps": train_timesteps}, 
+                                                      {"adapt/adapted test reward": adapt_avg_rew,
+                                                       "adapt/test reward": avg_rew}, run_name="")
 

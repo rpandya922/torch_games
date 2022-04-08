@@ -51,6 +51,7 @@ class LTAExtractor(BaseFeaturesExtractor):
         if self.human_pred:
             human_pred = self.human(observations)
             robot_feat = self.robot(observations)
-            return self.joint(th.cat((human_pred, robot_feat), 1))
+            # return self.joint(th.cat((human_pred, robot_feat), 1))
+            return th.cat((human_pred, robot_feat), 1)
         else:
             return self.joint(self.robot(observations))

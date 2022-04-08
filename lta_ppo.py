@@ -183,6 +183,7 @@ class LTA_PPO(OnPolicyAlgorithm):
 
         entropy_losses = []
         pg_losses, value_losses = [], []
+        sens_losses = []
         clip_fractions = []
 
         continue_training = True
@@ -206,6 +207,25 @@ class LTA_PPO(OnPolicyAlgorithm):
                 if self.use_sde:
                     self.policy.reset_noise(self.batch_size)
 
+                # TODO: check if self.policy.features_extractor.human_pred is true
+                # NOTE: this is a hacky way of computing these gradients manually 
+                # use preprocess_obs to get input to features_extractor
+                # preprocessed_obs = preprocess_obs(rollout_data.observations, self.observation_space)
+                # # get output of human and robot subnetworks
+                # human_out = self.policy.features_extractor.human(preprocessed_obs)
+                # robot_out = self.policy.features_extractor.robot(preprocessed_obs)
+                # # concat inputs
+                # def joint_grad(human_out):
+                #     joint_in = th.cat((human_out, robot_out), 1)
+                #     return self.policy.features_extractor.joint(joint_in)
+
+                # # conpute gradient of output of joint wrt human pred output
+                # joint_grad_tensor = th.autograd.functional.jacobian(joint_grad, human_out, create_graph=True)
+                # sensitivity_loss = -th.norm(joint_grad_tensor)
+                sensitivity_loss = th.tensor(0.0)
+                sens_losses.append(sensitivity_loss.item())
+                sens_coef = 1.0
+                
                 values, log_prob, entropy = self.policy.evaluate_actions(rollout_data.observations, actions)
                 values = values.flatten()
                 # Normalize advantage
@@ -248,7 +268,7 @@ class LTA_PPO(OnPolicyAlgorithm):
 
                 entropy_losses.append(entropy_loss.item())
 
-                loss = policy_loss + self.ent_coef * entropy_loss + self.vf_coef * value_loss
+                loss = policy_loss + self.ent_coef * entropy_loss + self.vf_coef * value_loss + sens_coef * sensitivity_loss
 
                 # Calculate approximate form of reverse KL Divergence for early stopping
                 # see issue #417: https://github.com/DLR-RM/stable-baselines3/issues/417
@@ -282,6 +302,7 @@ class LTA_PPO(OnPolicyAlgorithm):
         self.logger.record("train/entropy_loss", np.mean(entropy_losses))
         self.logger.record("train/policy_gradient_loss", np.mean(pg_losses))
         self.logger.record("train/value_loss", np.mean(value_losses))
+        self.logger.record("train/sensitivity_loss", np.mean(sens_losses))
         self.logger.record("train/approx_kl", np.mean(approx_kl_divs))
         self.logger.record("train/clip_fraction", np.mean(clip_fractions))
         self.logger.record("train/loss", loss.item())

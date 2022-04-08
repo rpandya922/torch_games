@@ -129,15 +129,16 @@ if __name__ == "__main__":
     horizon = 20
     train_timesteps = 60_000
     n_eval = 100
-    training_partners = [helpful_partner, adversarial_partner]
+    training_partners = [helpful_partner]
     testing_partner = [adversarial_partner]
+    log_testing = True
 
     env = RepeatedBoSEnv(partner_policies=training_partners, horizon=horizon)
     model = LTA_PPO(
         policy=ActorCriticPolicy, 
         env=env,
         policy_kwargs={"features_extractor_class": LTAExtractor,
-                       "features_extractor_kwargs": {"features_dim": 16, 
+                       "features_extractor_kwargs": {"features_dim": 34,#16, 
                                                      "n_actions": 2,
                                                      "human_pred": True}},
         tensorboard_log="./lta_ppo_bos_tensorboard/"
@@ -168,7 +169,7 @@ if __name__ == "__main__":
     env2 = RepeatedBoSEnv(partner_policies=testing_partner, horizon=horizon)
     # measure accuracy of human prediction model
     acc, avg_rew = eval_model(model, env2, n_eval=n_eval, adapt=False, 
-        trained_steps=train_timesteps, log=True)
+        trained_steps=train_timesteps, log=log_testing)
     print("----------------------------------------------------------")
     print("After training (different human partner)")
     print(f"Average Reward: {avg_rew}  Human Model Accuracy: {acc*100}%")
@@ -179,7 +180,7 @@ if __name__ == "__main__":
     env2 = RepeatedBoSEnv(partner_policies=testing_partner, horizon=horizon)
     # measure accuracy of human prediction model
     acc, adapt_avg_rew = eval_model(model, env2, n_eval=n_eval, adapt=True, 
-        trained_steps=train_timesteps, log=True)
+        trained_steps=train_timesteps, log=log_testing)
     print("----------------------------------------------------------")
     print("[with adaptation] After training (different human partner)")
     print(f"Average Reward: {adapt_avg_rew}  Human Model Accuracy: {acc*100}%")

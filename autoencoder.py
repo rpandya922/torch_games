@@ -6,11 +6,15 @@ from torch.utils.data import Dataset, DataLoader
 import numpy as np
 
 from BoSEnv import RepeatedBoSEnv
-from bos_runner import helpful_partner, adversarial_partner
+from utils import helpful_partner, adversarial_partner
 
 class Autoencoder(nn.Module):
     def __init__(self, n_input, n_latent, n_output):
         super().__init__()
+
+        self.n_input = n_input
+        self.n_latent = n_latent
+        self.n_output = n_output
 
         self.encoder = nn.Sequential(
             nn.Linear(n_input, 16),
@@ -92,6 +96,7 @@ def train(model, optimizer, trainset_loader, valset_loader, epoch=50):
             model_out = model(data)
 
             # compute loss
+            # TODO: understand why CE loss broke things
             loss = nn.MSELoss(reduction="sum")
             output = loss(model_out, target)
             total_loss += output.item()
@@ -115,8 +120,32 @@ def train(model, optimizer, trainset_loader, valset_loader, epoch=50):
 
     return all_train_loss, all_val_loss
 
+def train_and_save(partner_policies):
+    states, actions = create_dataset(partner_policies, n_datapoints=8000)
+    trainset = AEDataset(states, actions)
+    trainset_loader = DataLoader(trainset, batch_size=32, shuffle=True)
+
+    states, actions = create_dataset(partner_policies, n_datapoints=2000)
+    valset = AEDataset(states, actions)
+    valset_loader = DataLoader(valset, batch_size=32, shuffle=True)
+
+    ## TRAINING PARAMS
+    epoch = 70
+    lr = 5e-3
+
+    # input is states and actions, output is just actions
+    model = Autoencoder(n_input=6, n_latent=1, n_output=2)
+    optimizer = th.optim.Adam(model.parameters(), lr=lr)
+    all_train_loss, all_val_loss = train(model, optimizer, trainset_loader, valset_loader, epoch)
+
+    # save model
+    th.save(model.state_dict(), "./data/autoencoder.pt")
+
+
 if __name__ == "__main__":
     partner_policies = [helpful_partner, adversarial_partner]
+
+    # train_and_save(partner_policies)
 
     states, actions = create_dataset(partner_policies, n_datapoints=8000)
     trainset = AEDataset(states, actions)

@@ -12,6 +12,17 @@ from stable_baselines3.common.type_aliases import GymEnv, MaybeCallback, Schedul
 from stable_baselines3.common.utils import explained_variance, get_schedule_fn
 from stable_baselines3.common.preprocessing import preprocess_obs
 
+# # TODO: move this into utils file when finished
+# def add_obs_history(rollout_buffer):
+#     obs_squeezed = rollout_buffer.observations.squeeze()
+#     obs_aug = np.hstack((obs_squeezed[1:,:], obs_squeezed[:-1,:], obs_squeezed[1:,:][:,1].reshape(-1,1)))
+
+#     # 0-pad first timestep 
+#     obs_aug = np.vstack((np.hstack((obs_squeezed[0,:], np.zeros(3))), obs_aug))
+
+#     rollout_buffer.obs_shape = obs_aug.shape[1] 
+#     rollout_buffer.observations = np.expand_dims(obs_aug, 1)
+
 
 class LTA_PPO(OnPolicyAlgorithm):
     """
@@ -333,8 +344,13 @@ class LTA_PPO(OnPolicyAlgorithm):
 
             # TODO: account for batch size?
             observations = th.tensor(self.rollout_buffer.observations.squeeze())
+            preprocessed_obs = preprocess_obs(observations[:-1,:], self.observation_space)
+            
+            if self.policy.features_extractor.strategy_encoder is not None:
+                latent_state = self.policy.features_extractor.strategy_encoder.encoder(preprocessed_obs[:,4:])
+                preprocessed_obs = th.cat((preprocessed_obs, latent_state), 1)
 
-            pred_actions = self.policy.features_extractor.human(preprocess_obs(observations[:-1,:], self.observation_space))
+            pred_actions = self.policy.features_extractor.human(preprocessed_obs)
             next_actions = F.one_hot(observations[:,1][1:].long(), num_classes=2).float()
 
             pred_action_labels = th.argmax(pred_actions, dim=1)

@@ -11,22 +11,8 @@ from stable_baselines3.common.logger import configure
 from lta_ppo import LTA_PPO
 from lta_features import LTAExtractor
 from BoSEnv import RepeatedBoSEnv
-
-def bach_partner(obs):
-    return 0
-
-def stravinsky_partner(obs):
-    return 1
-
-def helpful_partner(obs):
-    # always picks what the robot picked last time
-    return obs[0]
-
-def adversarial_partner(obs):
-    # always picks the opposite of what the robot picked last time
-    if obs[0] == 1:
-        return 0
-    return 1
+from utils import helpful_partner, adversarial_partner
+from autoencoder import Autoencoder
 
 def eval_model(model, env, n_eval=50, adapt=False, trained_steps=0, log=False):
     """
@@ -61,6 +47,11 @@ def eval_model(model, env, n_eval=50, adapt=False, trained_steps=0, log=False):
         actions, values, log_probs = model.policy(obs_tensor)
 
         preprocessed_obs = preprocess_obs(obs_tensor, model.observation_space)
+
+        if model.policy.features_extractor.strategy_encoder is not None:
+            latent_state = model.policy.features_extractor.strategy_encoder.encoder(preprocessed_obs[:,4:])
+            preprocessed_obs = th.cat((preprocessed_obs, latent_state), 1)
+
         human_pred = model.policy.features_extractor.human(preprocessed_obs)
 
         next_obs, rew, done, _ = env.step(actions[0])
@@ -133,6 +124,10 @@ if __name__ == "__main__":
     testing_partner = [adversarial_partner]
     log_testing = True
 
+    # load autoencoder
+    ae_model = Autoencoder(n_input=6, n_latent=1, n_output=2)
+    ae_model.load_state_dict(th.load("./data/autoencoder.pt"))
+
     env = RepeatedBoSEnv(partner_policies=training_partners, horizon=horizon)
     model = LTA_PPO(
         policy=ActorCriticPolicy, 
@@ -140,7 +135,8 @@ if __name__ == "__main__":
         policy_kwargs={"features_extractor_class": LTAExtractor,
                        "features_extractor_kwargs": {"features_dim": 34,#16, 
                                                      "n_actions": 2,
-                                                     "human_pred": True}},
+                                                     "human_pred": True,
+                                                     "strategy_encoder": ae_model}},
         tensorboard_log="./lta_ppo_bos_tensorboard/"
     )
 

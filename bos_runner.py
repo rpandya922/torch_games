@@ -2,6 +2,7 @@ import gym
 import torch as th
 from torch.nn import functional as F
 import numpy as np
+import matplotlib.pyplot as plt
 
 from stable_baselines3.common.policies import ActorCriticPolicy
 from stable_baselines3.common.utils import obs_as_tensor
@@ -11,7 +12,7 @@ from stable_baselines3.common.logger import configure
 from lta_ppo import LTA_PPO
 from lta_features import LTAExtractor
 from BoSEnv import RepeatedBoSEnv
-from utils import helpful_partner, adversarial_partner
+from utils import helpful_partner, adversarial_partner, bach_partner, stravinsky_partner
 from autoencoder import Autoencoder
 
 def eval_model(model, env, n_eval=50, adapt=False, trained_steps=0, log=False):
@@ -60,8 +61,10 @@ def eval_model(model, env, n_eval=50, adapt=False, trained_steps=0, log=False):
         pred_action = th.argmax(human_pred)
 
         # store data for adaptation
-        observations.append(preprocessed_obs)
-        human_actions.append(next_h_action)
+        # don't store if this is the first step after the env has been reset
+        if env.game_num != 1:
+            observations.append(preprocessed_obs)
+            human_actions.append(next_h_action)
 
         if next_h_action == pred_action:
             corrects[i] = 1
@@ -73,7 +76,7 @@ def eval_model(model, env, n_eval=50, adapt=False, trained_steps=0, log=False):
             obs = env.reset()
 
         # run adaptation
-        if adapt and i >= 1:
+        if adapt and i > 1:
             n_grad_steps = 3
             for j in range(n_grad_steps):
                 obs_tensor = th.concat(observations, 0)
@@ -110,8 +113,7 @@ def eval_model(model, env, n_eval=50, adapt=False, trained_steps=0, log=False):
 
     rolling_avg = np.convolve(corrects, np.ones(20)/20, mode='valid')
 
-    return n_correct / n_eval, np.mean(rewards)
-
+    return n_correct / n_eval, np.mean(rewards), rewards
 
 if __name__ == "__main__":
     th.manual_seed(0)
@@ -120,13 +122,18 @@ if __name__ == "__main__":
     horizon = 20
     train_timesteps = 60_000
     n_eval = 100
-    training_partners = [helpful_partner]
-    testing_partner = [adversarial_partner]
+    training_partners = [adversarial_partner]
+    testing_partner = [helpful_partner]
     log_testing = True
+    use_encoder = False
+    train_vanilla = False
 
-    # load autoencoder
-    ae_model = Autoencoder(n_input=6, n_latent=1, n_output=2)
-    ae_model.load_state_dict(th.load("./data/autoencoder.pt"))
+    if use_encoder:
+        # load autoencoder
+        ae_model = Autoencoder(n_input=6, n_latent=1, n_output=2)
+        ae_model.load_state_dict(th.load("./data/autoencoder.pt"))
+    else:
+        ae_model = None
 
     env = RepeatedBoSEnv(partner_policies=training_partners, horizon=horizon)
     model = LTA_PPO(
@@ -140,7 +147,19 @@ if __name__ == "__main__":
         tensorboard_log="./lta_ppo_bos_tensorboard/"
     )
 
-    acc, avg_rew = eval_model(model, env, n_eval=n_eval, log=False)
+    # TODO: consider adding joint reasoning back so number of features stays the same
+    model_ppo = LTA_PPO(
+        policy=ActorCriticPolicy, 
+        env=env,
+        policy_kwargs={"features_extractor_class": LTAExtractor,
+                       "features_extractor_kwargs": {"features_dim": 32, 
+                                                     "n_actions": 2,
+                                                     "human_pred": False,
+                                                     "strategy_encoder": None}},
+        # tensorboard_log="./lta_ppo_bos_tensorboard/"
+    )
+
+    acc, avg_rew, _ = eval_model(model, env, n_eval=n_eval, log=False)
     print("----------------------------------------------------------")
     print("Before training")
     print(f"Average Reward: {avg_rew}  Human Model Accuracy: {acc*100}%")
@@ -149,12 +168,18 @@ if __name__ == "__main__":
 
     model.learn(total_timesteps=train_timesteps)
 
+    if train_vanilla:
+        model_ppo.learn(total_timesteps=train_timesteps)
+
+    # save learned weights to tmp file
+    model.save("./data/tmp_lta_ppo")
+
     # testing effect of human pred network on joint reasoning output 
     # joint_in = th.zeros(34).float()
     # print(th.autograd.functional.jacobian(model.policy.features_extractor.joint, joint_in)[:,:2])
 
     # measure accuracy of human prediction model
-    acc, avg_rew = eval_model(model, env, n_eval=n_eval, log=False)
+    acc, avg_rew, _ = eval_model(model, env, n_eval=n_eval, log=False)
     print("----------------------------------------------------------")
     print("After training")
     print(f"Average Reward: {avg_rew}  Human Model Accuracy: {acc*100}%")
@@ -164,7 +189,7 @@ if __name__ == "__main__":
     # test on different human partner policy than training
     env2 = RepeatedBoSEnv(partner_policies=testing_partner, horizon=horizon)
     # measure accuracy of human prediction model
-    acc, avg_rew = eval_model(model, env2, n_eval=n_eval, adapt=False, 
+    acc, avg_rew, test_rewards = eval_model(model, env2, n_eval=n_eval, adapt=False, 
         trained_steps=train_timesteps, log=log_testing)
     print("----------------------------------------------------------")
     print("After training (different human partner)")
@@ -175,7 +200,7 @@ if __name__ == "__main__":
     # test on different human partner policy than training
     env2 = RepeatedBoSEnv(partner_policies=testing_partner, horizon=horizon)
     # measure accuracy of human prediction model
-    acc, adapt_avg_rew = eval_model(model, env2, n_eval=n_eval, adapt=True, 
+    acc, adapt_avg_rew, _ = eval_model(model, env2, n_eval=n_eval, adapt=True, 
         trained_steps=train_timesteps, log=log_testing)
     print("----------------------------------------------------------")
     print("[with adaptation] After training (different human partner)")
@@ -191,3 +216,32 @@ if __name__ == "__main__":
                                                       {"adapt/adapted test reward": adapt_avg_rew,
                                                        "adapt/test reward": avg_rew}, run_name="")
 
+
+    env2 = RepeatedBoSEnv(partner_policies=testing_partner, horizon=n_eval)
+    all_rewards = []
+    for _ in range(10):
+        model2 = LTA_PPO.load("./data/tmp_lta_ppo")
+        _, _, rewards = eval_model(model2, env2, n_eval=n_eval, adapt=True, 
+            trained_steps=train_timesteps, log=False)
+        all_rewards.append(rewards)
+
+    nonadapt_rewards = []
+    for _ in range(10):
+        model2 = LTA_PPO.load("./data/tmp_lta_ppo")
+        _, _, rewards = eval_model(model2, env2, n_eval=n_eval, adapt=False, 
+            trained_steps=train_timesteps, log=False)
+        nonadapt_rewards.append(rewards)
+
+    vanilla_rewards = []
+    if train_vanilla:
+        for _ in range(10):
+            _, _, rewards = eval_model(model_ppo, env2, n_eval=n_eval, adapt=False, 
+                trained_steps=train_timesteps, log=False)
+            vanilla_rewards.append(rewards)
+
+    plt.plot(np.mean(all_rewards, axis=0), label="adapted")
+    plt.plot(np.mean(nonadapt_rewards, axis=0), label="non-adapted")
+    if train_vanilla:
+        plt.plot(np.mean(vanilla_rewards, axis=0), label="vanilla ppo")
+    plt.legend()
+    plt.show()

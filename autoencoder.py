@@ -6,7 +6,7 @@ from torch.utils.data import Dataset, DataLoader
 import numpy as np
 
 from BoSEnv import RepeatedBoSEnv
-from utils import helpful_partner, adversarial_partner
+from utils import helpful_partner, adversarial_partner, train
 
 class Autoencoder(nn.Module):
     def __init__(self, n_input, n_latent, n_output):
@@ -51,6 +51,63 @@ class AEDataset(Dataset):
 def dummy_robot_policy(obs, env):
     return env.action_space.sample()
 
+def create_dataset2(partner_policies, horizon=20, n_datapoints=10000, onehot_actions=True):
+    # TODO: combine with function below
+    env = RepeatedBoSEnv(partner_policies, horizon)
+    obs = env.reset()
+
+    robot_policy = lambda obs: dummy_robot_policy(obs, env)
+
+    all_states = [[]]
+    all_h_actions = [[]]
+
+    for i in range(n_datapoints):
+        robot_action = robot_policy(obs)
+        next_obs, rew, done, _ = env.step(robot_action)
+
+        all_states[-1].append(obs)
+        all_h_actions[-1].append(next_obs[1])
+
+        obs = next_obs
+        if done:
+            obs = env.reset()
+            all_states.append([])
+            all_h_actions.append([])
+
+    # one-hot encode states 
+    states = np.array(all_states[:-1])
+    states2 = np.dstack((np.eye(2)[states[:,:,0]], np.eye(2)[states[:,:,1]]))
+    states2 = states2.swapaxes(0, 1).swapaxes(1, 2)
+
+    states = states.swapaxes(0, 1).swapaxes(1, 2)
+    states_onehot = []
+    for j in range(states.shape[2]):
+        # only care about first two elements of state
+        states_onehot.append(np.hstack((np.eye(2)[states[:,0,j]], np.eye(2)[states[:,1,j]])))
+    states = np.dstack(states_onehot)
+
+    # one-hot encode actions
+    actions = np.array(all_h_actions[:-1])
+    actions2 = np.eye(2)[np.array(all_h_actions[:-1])]
+    actions2 = actions2.swapaxes(0, 1).swapaxes(1, 2)
+
+    actions = actions.swapaxes(0, 1)
+    actions_onehot = []
+    for j in range(actions.shape[1]):
+        # only care about first two elements of state
+        actions_onehot.append(np.eye(2)[actions[:,j]])
+
+    if onehot_actions:
+        actions = np.dstack(actions_onehot)
+    else:
+        actions = np.expand_dims(actions, 1)
+
+    # print((states == states2).all(), (actions == actions2).all())
+
+    return states, actions
+
+    # return states.swapaxes(0, 1).swapaxes(1, 2), actions.swapaxes(0, 1).swapaxes(1, 2)
+
 def create_dataset(partner_policies, horizon=20, n_datapoints=10000):
 
     env = RepeatedBoSEnv(partner_policies, horizon)
@@ -80,45 +137,6 @@ def create_dataset(partner_policies, horizon=20, n_datapoints=10000):
     actions = np.eye(2)[np.array(all_h_actions)]
 
     return states, actions
-
-
-def train(model, optimizer, trainset_loader, valset_loader, epoch=50):
-    all_train_loss = []
-    all_val_loss = []
-    batch_size = trainset_loader.batch_size
-
-    iteration = 0
-    for ep in range(epoch):
-        model.train()
-        total_loss = 0
-        for batch_idx, (data, target) in enumerate(trainset_loader):
-            # forward pass
-            model_out = model(data)
-
-            # compute loss
-            # TODO: understand why CE loss broke things
-            loss = nn.MSELoss(reduction="sum")
-            output = loss(model_out, target)
-            total_loss += output.item()
-
-            optimizer.zero_grad()
-            output.backward()
-            optimizer.step()
-
-            iteration += 1
-        all_train_loss.append(total_loss / (batch_idx+1) / batch_size)
-
-        # test on validation
-        model.eval()
-        val_loss = 0
-        for batch_idx, (data, target) in enumerate(valset_loader):
-            model_out = model(data)
-
-            loss = nn.MSELoss(reduction="sum")
-            val_loss += loss(model_out, target).item()
-        all_val_loss.append(val_loss / (batch_idx+1) / batch_size)
-
-    return all_train_loss, all_val_loss
 
 def train_and_save(partner_policies):
     states, actions = create_dataset(partner_policies, n_datapoints=8000)

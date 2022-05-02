@@ -122,8 +122,8 @@ if __name__ == "__main__":
     horizon = 20
     train_timesteps = 60_000
     n_eval = 100
-    training_partners = [adversarial_partner]
-    testing_partner = [helpful_partner]
+    training_partners = [stravinsky_partner, helpful_partner]
+    testing_partner = [adversarial_partner]
     log_testing = True
     use_encoder = False
     train_vanilla = False
